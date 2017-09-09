@@ -1,4 +1,4 @@
-(function(exports) {
+window.$moduleCPU = (function(exports) {
 	"use strict";
 
     // The cycle counts of all the instructions in the CPU
@@ -29,9 +29,6 @@
         1, 1, 2, 3, 2, 3, 1, 2, 2, 3, 3, 2, 3, 1, 3,  2, // 2
         2, 1, 2, 3, 2, 3, 3, 2, 3, 1, 2, 2, 3, 1, 3,  2, // 3
     ];
-
-    // Debugging infrastructure
-    var TRACE = false;
 
     // Flags in the PSW (Program Status Ward)
     var FLAG_N = (1 << 7); // Negative
@@ -67,17 +64,6 @@
     var FUNC_REGISTER_COUNTER0 = 0xFD; // Counter-0
     var FUNC_REGISTER_COUNTER1 = 0xFE; // Counter-1
     var FUNC_REGISTER_COUNTER2 = 0xFF; // Counter-2
-
-	/*
-	function loadoutb() {
-		var req = new XMLHttpRequest();
-		req.open('GET', 'inst.txt', false);
-		req.overrideMimeType('text/plain');
-		req.send();
-		return req.response.split('\n');
-	}
-	var outb = loadoutb();
-	*/
 
 	function Timer(idx, rate) {
 		this._idx = idx;
@@ -127,9 +113,6 @@
 		var oldAbsTicks = ((((oldTime / this._rate) | 0)) / divisor) | 0;
 		var newAbsTicks = ((((endTime / this._rate) | 0)) / divisor) | 0;
 		var nTicks = newAbsTicks - oldAbsTicks;
-
-		if (TRACE)
-			console.log("Running Timer", oldTime / this._rate, endTime / this._rate, nTicks);
 
 		this._counter += nTicks;
 		// Keep it a four-bit counter.
@@ -315,19 +298,6 @@
 
             time += cycles;
 
-            if (TRACE) {
-				var line = ['INST', this._instCounter, time, pc.toString(16), op.toString(16), (nz & NZ_NEG_MASK) ? "n" : " ", (!nz) ? "z" : " ", c ? "c" : " ", a, x, y].join(' ');
-				console.log(line, this._instCounter);
-				if (line != outb[this._instCounter]) {
-					console.log("CPU MISMATCH!");
-					console.log(line);
-					console.log(outb[this._instCounter]);
-					XXX
-				}
-
-                this._instCounter++;
-            }
-
             pc++;
             var data = ram[pc++];
 
@@ -479,6 +449,9 @@
                     break;
                 case 0x08: // OR A, #imm
                     a = nz = (a | data);
+                    break;
+                case 0x24: // AND A, dp
+                    a = nz = (a & read(dp + data));
                     break;
                 case 0x28: // AND A, #imm
                     a = nz = (a & data);
@@ -707,7 +680,6 @@
 
                 default:
                     console.error("unknown opcode", op.toString(16));
-					if (TRACE) XXX
                     break;
             }
         }
@@ -728,12 +700,15 @@
 		state.psw |= (nz & NZ_NEG_MASK) ? FLAG_N : 0;
 		state.psw |= dp ? FLAG_P : 0;
 
-		// console.log(state.psw);
-
         this._time = time;
         return this._time;
     };
+    CPU.prototype.runUntilSamples = function(nSamples) {
+        var dt = nSamples * this._dsp.CLOCKS_PER_SAMPLE;
+        var t = this._time + dt;
+        this.runUntil(t);
+    };
 
-    exports.SPC.CPU = CPU;
+    exports.SPC_CPU = CPU;
 
-})(window);
+})(this);

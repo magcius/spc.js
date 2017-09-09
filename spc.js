@@ -78,6 +78,15 @@
         document.body.removeChild(elem);
     }
 
+    function makeWorker(modules, entryPoint) {
+        var source = modules.map(o => o.toString()).concat(entryPoint);
+        var blob = new Blob(sources, { type: 'text/javascript' });
+        var url = window.URL.createObjectURL(blob);
+        var w = new Worker(url);
+        window.URL.revokeObjectURL(url);
+        return w;
+    }
+
     function loadSPC(stream) {
         var signature = readString(stream, 37);
 
@@ -101,31 +110,37 @@
         spc.id666 = parseID666(stream);
         state.ram = mmap(stream, 0x10000);
         state.regs = mmap(stream, 128);
-        // var boot_rom = mmap(stream, 128);
 
-        var dsp = new SPC.DSP(state);
-        var cpu = new SPC.CPU(state, dsp);
-
-        var t = 0;
-        function go() {
-            cpu.runUntil(t += (32000 * 1));
-            setTimeout(go, 20);
-        }
-        go();
-
-        /*
-        var blobParts = [];
-        for (var i = 0; i < 4; i++) {
-            cpu.runUntil(t += (32000 * 200));
-            var blobPart = dsp._obuf.buffer.slice(0, dsp._ringBufferWP * 2 * 2);
-            blobParts.push(blobPart);
-            dsp._ringBufferWP = 0;
-        }
-
-        var blob = new Blob(blobParts, { type: 'application/octet-stream' });
-        downloadBlob("wsamples.bin", blob);
-        */
+        var d = new Driver(state);
     }
+
+    function Driver(state) {
+        this._bufferSize = 8192;
+
+        this._ctx = new AudioContext();
+        this._dsp = new SPC_DSP(state, this._buffer);
+        this._cpu = new SPC_CPU(state, this._dsp);
+
+        this._playTime = this._ctx.currentTime;
+        this._runCPU();
+    }
+    Driver.prototype._runCPU = function() {
+        setTimeout(this._runCPU.bind(this), 0);
+
+        // Don't let ourselves get too far ahead...
+        if (this._playTime - this._ctx.currentTime > 1)
+            return;
+
+        var buffer = this._ctx.createBuffer(2, this._bufferSize, 32000);
+        this._dsp.resetBuffer(buffer);
+        this._cpu.runUntilSamples(this._bufferSize);
+
+        var bs = this._ctx.createBufferSource();
+        bs.buffer = buffer;
+        bs.connect(this._ctx.destination);
+        bs.start(this._playTime);
+        this._playTime += (this._bufferSize / 32000);
+    };
 
     function fetch(path) {
         var request = new XMLHttpRequest();
@@ -141,24 +156,6 @@
             var stream = makeStream(req.response);
             loadSPC(stream);
         };
-
-        /*
-        var req1 = fetch("samples.bin");
-        req1.onload = function() {
-            var smps = new DataView(req1.response);
-            var smpoff = 0x10;
-            window.checksmp = function(l, r) {
-                var sl = smps.getInt16(smpoff, true);
-                if (l != sl) { console.log("MISMATCH L", smpoff.toString(16), l, sl, smps.getUint8(smpoff).toString(16), smps.getUint8(smpoff+1).toString(16)); XXX }
-                smpoff += 2;
-                var sr = smps.getInt16(smpoff, true);
-                if (r != sr) { console.log("MISMATCH R", smpoff.toString(16), r, sr); XXX }
-                smpoff += 2;
-            };
-        };
-        */
     };
-
-    exports.SPC = {};
 
 })(window);

@@ -1,4 +1,4 @@
-(function(exports) {
+window.$moduleDSP = (function(exports) {
     "use strict";
 
     var GLOBAL_REG_MASTER_VOL_L = 0x0C; // Left-channel master-volume
@@ -92,17 +92,6 @@
         this._voices = [];
         for (var i = 0; i < 8; i++)
             this._voices.push(newVoice());
-
-        this._ringBufferL = new Int16Array(4096 * 50);
-        this._ringBufferR = new Int16Array(4096 * 50);
-        // this._obuf = new Int16Array(4096 * 50 * 2);
-        this._ringBufferWP = 0;
-        this._ringBufferRP = 0;
-
-        this._ctx = new AudioContext();
-        this._scriptNode = this._ctx.createScriptProcessor(4096, 0, 2);
-        this._scriptNode.onaudioprocess = this._fillAudio.bind(this);
-        this._scriptNode.connect(this._ctx.destination);
     }
 
     DSP.prototype._runCounter = function(i) {
@@ -110,28 +99,6 @@
         if ( !(n-- & 7) )
             n -= 6 - i;
         this._counters[i] = n & 0xFFFF;
-    };
-
-    DSP.prototype._fillAudio = function(event) {
-        var outputBuffer = event.outputBuffer;
-        var l = outputBuffer.getChannelData(0);
-        var r = outputBuffer.getChannelData(1);
-
-        var i = 0;
-        var writeSamples = function() {
-            l[i] = this._ringBufferL[this._ringBufferRP] / 0xFFFF;
-            r[i] = this._ringBufferR[this._ringBufferRP] / 0xFFFF;
-            this._ringBufferRP++; i++;
-        }.bind(this);
-
-        while (this._ringBufferRP > this._ringBufferWP) {
-            writeSamples();
-            if (this._ringBufferRP >= this._ringBufferL.length)
-                this._ringBufferRP = 0;
-        }
-        while (this._ringBufferRP < this._ringBufferWP) {
-            writeSamples();
-        }
     };
 
     DSP.prototype.getRegister = function(index) {
@@ -146,7 +113,6 @@
 
     DSP.prototype.runUntil = function(endTime) {
         // The DSP emits a sample every 32 CPU cycles.
-        // console.log("RUN DSP", this._time, endTime);
 
         // endTime is *exclusive*. We don't actually run all the way until endTime
         // if it's locked on phase. That will happen in the next period.
@@ -159,8 +125,6 @@
         var nSamples = newCycles - oldCycles;
         if (!nSamples)
             return;
-
-        // console.log("DSP C", nSamples);
 
         // Returns the index for a voice register, given
         // the voice number and the register
@@ -314,7 +278,6 @@
             var revOffset = gaussOffset;
 
             var brrOffset = voice.brrPos + ((voice.interpPos >> 12) & 0x7FFF);
-            flog("IP", voiceIdx, voice.interpPos, voice.sampleAddr, voice.brrBuffer[brrOffset + 0], voice.brrBuffer[brrOffset + 1], voice.brrBuffer[brrOffset + 2], voice.brrBuffer[brrOffset + 3]);
             var output = (GAUSS_TABLE[fwdOffset +   0] * voice.brrBuffer[brrOffset + 0] +
                           GAUSS_TABLE[fwdOffset + 256] * voice.brrBuffer[brrOffset + 1] +
                           GAUSS_TABLE[revOffset + 256] * voice.brrBuffer[brrOffset + 2] +
@@ -329,7 +292,7 @@
             return counters[COUNTER_SELECT[rate]] & COUNTER_MASK[rate];
         }
 
-        var runVoice = function(voiceIdx) {
+        var runVoice = function runVoice(voiceIdx) {
             var voiceBit = (1 << voiceIdx);
             var voice = this._voices[voiceIdx];
 
@@ -376,8 +339,6 @@
                     voice.envx = voice.newEnvx;
             }
 
-            // flog("VOI", voiceIdx, voice.keyOnDelay);
-
             // This is the same for both ADSR and GAIN modes.
             if (voice.keyOnDelay == 0) {
                 if (voice.envelopeState == EnvelopeState.RELEASE) {
@@ -418,7 +379,6 @@
             }
 
             var oldPos = voice.interpPos;
-            flog("PTC", voiceIdx, oldPos, pitch, this._regs[voiceRegAddr(voiceIdx, VOICE_REG_PITCH_L)], this._regs[voiceRegAddr(voiceIdx, VOICE_REG_PITCH_H)]);
             voice.interpPos = (oldPos & 0x3FFF) + pitch;
 
             if (oldPos >= 0x4000) {
@@ -429,9 +389,7 @@
 
             if (voice.newEnvx > 0) {
                 output = gaussianInterpolate(voice);
-                flog("INR", output);
                 output = ((output * voice.newEnvx) >> 11);
-                flog("ENV", voice.newEnvx, output);
             } else {
                 output = 0;
             }
@@ -440,6 +398,9 @@
         }.bind(this);
 
         var keyOn, keyOff;
+        var wp = this.wp;
+        var dstL = this._buffer.getChannelData(0);
+        var dstR = this._buffer.getChannelData(1);
 
         while (nSamples--) {
             var outputL = 0, outputR = 0;
@@ -465,7 +426,6 @@
                 var r = output * volumeR;
                 outputL += l;
                 outputR += r;
-                // if (output != 0) { console.log("OUT", voiceIdx, output, volumeL, l); XXX }
             }
 
             var mainVolumeL = this._sregs[GLOBAL_REG_MASTER_VOL_L];
@@ -473,32 +433,22 @@
 
             var mainOutputL = clamp16((outputL * mainVolumeL) >> 14);
             var mainOutputR = clamp16((outputR * mainVolumeR) >> 14);
-            flog("MOUT", this._ringBufferWP, mainOutputL, outputL, mainVolumeL);
-            fart++;
 
-            // checksmp(mainOutputL, mainOutputR);
-
-            this._ringBufferL[this._ringBufferWP] = mainOutputL;
-            this._ringBufferR[this._ringBufferWP] = mainOutputR;
-            this._ringBufferWP++;
-            if (this._ringBufferWP >= this._ringBufferL.length)
-                this._ringBufferWP = 0;
-            if (this._ringBufferWP == this._ringBufferRP) throw "overrun";
+            dstL[wp] = mainOutputL / 0xFFFF;
+            dstR[wp] = mainOutputR / 0xFFFF;
+            ++wp;
         }
+
+        this.wp = wp;
     };
 
-    function flog() {
-        return;
+    DSP.prototype.resetBuffer = function(buffer) {
+        this._buffer = buffer;
+        this.wp = 0;
+    };
 
-        var args = [].slice.call(arguments);
-        console.log.apply(console, args);
+    DSP.prototype.CLOCKS_PER_SAMPLE = CLOCKS_PER_SAMPLE;
 
-        var N = 10050;
-        if (fart > N-5 && fart < N+5)
-            console.log.apply(console, args);
-    }
+    exports.SPC_DSP = DSP;
 
-    window.fart = 0;
-    exports.SPC.DSP = DSP;
-
-})(window);
+})(this);
