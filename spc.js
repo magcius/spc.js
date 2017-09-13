@@ -116,22 +116,22 @@
 
     function Driver(state) {
         this._bufferSize = 8192;
+        this._freeBuffers = [];
 
         this._ctx = new AudioContext();
         this._dsp = new SPC_DSP(state, this._buffer);
         this._cpu = new SPC_CPU(state, this._dsp);
 
         this._playTime = this._ctx.currentTime;
-        this._runCPU();
+        this._pumpAudio();
     }
     Driver.prototype._runCPU = function() {
-        setTimeout(this._runCPU.bind(this), 0);
-
-        // Don't let ourselves get too far ahead...
-        if (this._playTime - this._ctx.currentTime > 1)
-            return;
-
-        var buffer = this._ctx.createBuffer(2, this._bufferSize, 32000);
+        var buffer;
+        if (this._freeBuffers.length) {
+            buffer = this._freeBuffers.pop();
+        } else {
+            buffer = this._ctx.createBuffer(2, this._bufferSize, 32000);
+        }
         this._dsp.resetBuffer(buffer);
         this._cpu.runUntilSamples(this._bufferSize);
 
@@ -139,7 +139,16 @@
         bs.buffer = buffer;
         bs.connect(this._ctx.destination);
         bs.start(this._playTime);
+        bs.onended = function() {
+            this._freeBuffers.push(buffer);
+            this._pumpAudio();
+        }.bind(this);
         this._playTime += (this._bufferSize / 32000);
+    };
+    Driver.prototype._pumpAudio = function() {
+        // Schedule 300ms or so in advance.
+        while (this._playTime - this._ctx.currentTime < (300 / 1000))
+            this._runCPU();
     };
 
     function fetch(path) {
