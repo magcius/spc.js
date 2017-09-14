@@ -442,9 +442,9 @@ window.$moduleDSP = (function(exports) {
         this.wp = wp;
     };
 
-    DSP.prototype.resetBuffer = function(buffer, offset) {
+    DSP.prototype.resetBuffer = function(buffer) {
         this._buffer = buffer;
-        this.wp = offset;
+        this.wp = 0;
     };
 
     DSP.prototype.CLOCKS_PER_SAMPLE = CLOCKS_PER_SAMPLE;

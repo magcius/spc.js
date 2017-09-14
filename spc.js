@@ -116,12 +116,9 @@
 
     function Driver(state) {
         this._bufferSize = 8192;
+        this._freeBuffers = [];
 
         this._ctx = new AudioContext();
-        // Hold around 12 buffers in memory.
-        this._numBuffers = 12;
-        this._buffer = this._ctx.createBuffer(2, this._bufferSize * this._numBuffers, 32000);
-        this._bufferIdx = 0;
         this._dsp = new SPC_DSP(state, this._buffer);
         this._cpu = new SPC_CPU(state, this._dsp);
 
@@ -129,21 +126,24 @@
         this._pumpAudio();
     }
     Driver.prototype._runCPU = function() {
-        this._dsp.resetBuffer(this._buffer, this._bufferIdx * this._bufferSize);
+        var buffer;
+        if (this._freeBuffers.length) {
+            buffer = this._freeBuffers.pop();
+        } else {
+            buffer = this._ctx.createBuffer(2, this._bufferSize, 32000);
+        }
+        this._dsp.resetBuffer(buffer);
         this._cpu.runUntilSamples(this._bufferSize);
 
         var bs = this._ctx.createBufferSource();
-        bs.buffer = this._buffer;
+        bs.buffer = buffer;
         bs.connect(this._ctx.destination);
-        var bufferLength = this._bufferSize / this._buffer.sampleRate;
-        bs.start(this._playTime, bufferLength * this._bufferIdx, bufferLength);
+        bs.start(this._playTime);
         bs.onended = function() {
+            this._freeBuffers.push(buffer);
             this._pumpAudio();
         }.bind(this);
         this._playTime += (this._bufferSize / 32000);
-        this._bufferIdx++;
-        if (this._bufferIdx === this._numBuffers)
-            this._bufferIdx = 0;
     };
     Driver.prototype._pumpAudio = function() {
         // Schedule 300ms or so in advance.
