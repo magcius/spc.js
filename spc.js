@@ -111,7 +111,7 @@
         state.ram = mmap(stream, 0x10000);
         state.regs = mmap(stream, 128);
 
-        var d = new Driver(state);
+        return new Driver(state);
     }
 
     function Driver(state) {
@@ -150,6 +150,9 @@
         while (this._playTime - this._ctx.currentTime < (300 / 1000))
             this._runCPU();
     };
+    Driver.prototype.resume = function() {
+        this._ctx.resume();
+    };
 
     function fetch(path) {
         var request = new XMLHttpRequest();
@@ -163,7 +166,10 @@
         var req = fetch("brambles.spc");
         req.onload = function() {
             var stream = makeStream(req.response);
-            loadSPC(stream);
+            const d = loadSPC(stream);
+            document.onclick = function() {
+                d.resume();
+            };
         };
     };
 
