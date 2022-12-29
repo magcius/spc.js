@@ -50,3 +50,5 @@ doc
 higandsp/
 *.bin
 inst.txt
+
+*.spc
