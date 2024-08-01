@@ -145,7 +145,7 @@ function fetch(path) {
 }
 
 window.onload = function() {
-    var req = fetch("corn.spc");
+    var req = fetch("brambles.spc");
     req.onload = function() {
         var stream = makeStream(req.response);
         const d = loadSPC(stream);
